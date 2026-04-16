@@ -1,0 +1,147 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ─── Enums ────────────────────────────────────────────────────────────────────
+
+enum OrgMemberRole {
+  OWNER
+  ADMIN
+  MEMBER
+}
+
+enum PlanStatus {
+  DRAFT
+  ACTIVE
+  ARCHIVED
+}
+
+enum InvitationStatus {
+  PENDING
+  ACCEPTED
+  EXPIRED
+}
+
+// ─── Tier 1 — System Admins ───────────────────────────────────────────────────
+
+model SystemAdmin {
+  id        String   @id @default(cuid())
+  email     String   @unique
+  password  String
+  name      String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("system_admins")
+}
+
+// ─── Tier 2 — Organizations (Tenants) ────────────────────────────────────────
+
+model Organization {
+  id             String   @id @default(cuid())
+  name     String
+  slug     String  @unique
+  branding Json    @default("{\"primaryColor\":\"#2563EB\",\"secondaryColor\":\"#1E40AF\",\"logoUrl\":null}")
+  isActive Boolean @default(true)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  members     OrgMember[]
+  clients     Client[]
+  plans       Plan[]
+  invitations Invitation[]
+
+  @@map("organizations")
+}
+
+model OrgMember {
+  id             String        @id @default(cuid())
+  email          String
+  password       String
+  name           String
+  role           OrgMemberRole @default(MEMBER)
+  isActive       Boolean       @default(true)
+  organizationId String
+  organization   Organization  @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+
+  @@unique([email, organizationId])
+  @@index([organizationId])
+  @@map("org_members")
+}
+
+// ─── Tier 3 — Clients ────────────────────────────────────────────────────────
+
+model Client {
+  id             String       @id @default(cuid())
+  email          String
+  password       String
+  name           String
+  isActive       Boolean      @default(true)
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  joinedAt       DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  planAssignments PlanAssignment[]
+
+  @@unique([email, organizationId])
+  @@index([organizationId])
+  @@map("clients")
+}
+
+// ─── Plans ────────────────────────────────────────────────────────────────────
+
+model Plan {
+  id             String       @id @default(cuid())
+  name           String
+  description    String?
+  status         PlanStatus   @default(DRAFT)
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  assignments PlanAssignment[]
+
+  @@index([organizationId])
+  @@index([status])
+  @@map("plans")
+}
+
+model PlanAssignment {
+  id         String   @id @default(cuid())
+  clientId   String
+  planId     String
+  assignedAt DateTime @default(now())
+  client     Client   @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  plan       Plan     @relation(fields: [planId], references: [id], onDelete: Cascade)
+
+  @@unique([clientId, planId])
+  @@index([planId])
+  @@map("plan_assignments")
+}
+
+// ─── Invitations ─────────────────────────────────────────────────────────────
+
+model Invitation {
+  id             String           @id @default(cuid())
+  email          String
+  role           OrgMemberRole    @default(MEMBER)
+  status         InvitationStatus @default(PENDING)
+  token          String           @unique @default(cuid())
+  organizationId String
+  organization   Organization     @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  expiresAt      DateTime
+  acceptedAt     DateTime?
+  createdAt      DateTime         @default(now())
+
+  @@index([organizationId])
+  @@index([token])
+  @@map("invitations")
+}
