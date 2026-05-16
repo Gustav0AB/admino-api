@@ -1,10 +1,24 @@
 import { Router } from "express";
 import authRouter from "./auth";
+import membersRouter from "./members";
+import expensesRouter from "./expenses";
+import adminRouter from "./admin";
 import clientsRouter from "./clients";
+import plansRouter from "./plans";
+import memberRolesRouter from "./member-roles";
+import notificationsRouter from "./notifications";
+import auditLogsRouter from "./audit-logs";
 
 const router = Router();
 
 router.use("/auth", authRouter);
+router.use("/members", membersRouter);
+router.use("/expenses", expensesRouter);
+router.use("/admin", adminRouter);
 router.use("/clients", clientsRouter);
+router.use("/plans", plansRouter);
+router.use("/member-roles", memberRolesRouter);
+router.use("/notifications", notificationsRouter);
+router.use("/audit-logs", auditLogsRouter);
 
 export default router;

@@ -24,11 +24,11 @@ router.post(
     try {
       const { email, password } = loginSchema.parse(req.body);
 
-      const user =
-        (await prisma.systemAdmin.findUnique({ where: { email } })) ??
-        (await prisma.orgMember.findFirst({ where: { email } })) ??
-        (await prisma.client.findFirst({ where: { email } }));
+      const systemAdmin = await prisma.systemAdmin.findUnique({ where: { email } });
+      const clientMember = !systemAdmin ? await prisma.clientMember.findFirst({ where: { email } }) : null;
+      const member = !systemAdmin && !clientMember ? await prisma.member.findFirst({ where: { email } }) : null;
 
+      const user = systemAdmin ?? clientMember ?? member;
       if (!user || !(await bcrypt.compare(password, user.password))) {
         throw new HttpError(401, "Invalid credentials");
       }
@@ -36,8 +36,8 @@ router.post(
       const payload: JwtPayload = {
         sub: user.id,
         email: user.email,
-        role: "role" in user ? String(user.role) : "SYSTEM_ADMIN",
-        orgId: "organizationId" in user ? user.organizationId : null,
+        role: systemAdmin ? "SYSTEM_ADMIN" : clientMember ? String(clientMember.role) : "MEMBER",
+        orgId: "clientId" in user ? user.clientId : null,
       };
 
       const token = jwt.sign(payload, env.jwt.secret, {

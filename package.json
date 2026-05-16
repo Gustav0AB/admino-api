@@ -10,19 +10,25 @@
     "prisma:migrate": "prisma migrate dev",
     "prisma:studio": "prisma studio",
     "type-check": "tsc --noEmit",
-    "db:seed": "ts-node -r tsconfig-paths/register prisma/seed.ts"
+    "db:seed": "ts-node -r tsconfig-paths/register prisma/seed.ts",
+    "db:migrate": "bash scripts/migrate.sh",
+    "db:cleanup": "bash scripts/cleanup.sh"
   },
   "keywords": [],
   "author": "",
   "license": "ISC",
   "description": "",
   "dependencies": {
+    "@prisma/adapter-pg": "^7.7.0",
     "@prisma/client": "^7.6.0",
+    "@types/pg": "^8.20.0",
     "bcryptjs": "^3.0.3",
     "cors": "^2.8.5",
     "express": "^4.21.2",
     "helmet": "^8.0.0",
     "jsonwebtoken": "^9.0.2",
+    "pg": "^8.20.0",
+    "socket.io": "^4.8.3",
     "zod": "^3.24.2"
   },
   "devDependencies": {

@@ -12,8 +12,7 @@
     "noFallthroughCasesInSwitch": true,
     "resolveJsonModule": true,
     "esModuleInterop": true,
-    "ignoreDeprecations": "6.0",
-    "paths": {
+"paths": {
       "@lib/*": ["src/lib/*"],
       "@middleware/*": ["src/middleware/*"],
       "@routes/*": ["src/routes/*"],

@@ -8,7 +8,7 @@ datasource db {
 
 // ─── Enums ────────────────────────────────────────────────────────────────────
 
-enum OrgMemberRole {
+enum ClientMemberRole {
   OWNER
   ADMIN
   MEMBER
@@ -26,6 +26,17 @@ enum InvitationStatus {
   EXPIRED
 }
 
+enum ActorType {
+  SYSTEM_ADMIN
+  ORG_MEMBER
+  MEMBER
+}
+
+enum NotificationRecipientType {
+  ORG_MEMBER
+  MEMBER
+}
+
 // ─── Tier 1 — System Admins ───────────────────────────────────────────────────
 
 model SystemAdmin {
@@ -39,109 +50,195 @@ model SystemAdmin {
   @@map("system_admins")
 }
 
-// ─── Tier 2 — Organizations (Tenants) ────────────────────────────────────────
+// ─── Tier 2 — Clients (Tenants) ──────────────────────────────────────────────
 
-model Organization {
-  id             String   @id @default(cuid())
+model Client {
+  id       String  @id @default(cuid())
   name     String
   slug     String  @unique
   branding Json    @default("{\"primaryColor\":\"#2563EB\",\"secondaryColor\":\"#1E40AF\",\"logoUrl\":null}")
   isActive Boolean @default(true)
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
 
-  members     OrgMember[]
-  clients     Client[]
-  plans       Plan[]
-  invitations Invitation[]
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  clientMembers ClientMember[]
+  members       Member[]
+  plans         Plan[]
+  invitations   Invitation[]
+  notifications Notification[]
+  memberRoles   MemberRole[]
 
   @@map("organizations")
 }
 
-model OrgMember {
-  id             String        @id @default(cuid())
-  email          String
-  password       String
-  name           String
-  role           OrgMemberRole @default(MEMBER)
-  isActive       Boolean       @default(true)
-  organizationId String
-  organization   Organization  @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  createdAt      DateTime      @default(now())
-  updatedAt      DateTime      @updatedAt
+model ClientMember {
+  id       String           @id @default(cuid())
+  email    String
+  password String
+  name     String
+  role     ClientMemberRole @default(MEMBER)
+  permissions Json          @default("[]")
+  isActive    Boolean       @default(true)
+  clientId    String
+  client      Client        @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
 
-  @@unique([email, organizationId])
-  @@index([organizationId])
+  @@unique([email, clientId])
+  @@index([clientId])
   @@map("org_members")
 }
 
-// ─── Tier 3 — Clients ────────────────────────────────────────────────────────
+// ─── Tier 3 — Members (End-users of a Client) ────────────────────────────────
 
-model Client {
-  id             String       @id @default(cuid())
-  email          String
-  password       String
-  name           String
-  isActive       Boolean      @default(true)
-  organizationId String
-  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  joinedAt       DateTime     @default(now())
-  updatedAt      DateTime     @updatedAt
+model Member {
+  id       String   @id @default(cuid())
+  email    String
+  password String
+  name     String
+  isActive Boolean  @default(true)
+  clientId String
+  client   Client   @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  joinedAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
-  planAssignments PlanAssignment[]
+  planAssignments   PlanAssignment[]
+  memberRoleMembers MemberRoleAssignment[]
 
-  @@unique([email, organizationId])
-  @@index([organizationId])
+  @@unique([email, clientId])
+  @@index([clientId])
   @@map("clients")
 }
 
 // ─── Plans ────────────────────────────────────────────────────────────────────
 
 model Plan {
-  id             String       @id @default(cuid())
-  name           String
-  description    String?
-  status         PlanStatus   @default(DRAFT)
-  organizationId String
-  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  createdAt      DateTime     @default(now())
-  updatedAt      DateTime     @updatedAt
+  id          String     @id @default(cuid())
+  name        String
+  description String?
+  status      PlanStatus @default(DRAFT)
+  maxUsers    Int?
+  features    Json       @default("{}")
+  clientId    String
+  client      Client     @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
 
   assignments PlanAssignment[]
 
-  @@index([organizationId])
+  @@index([clientId])
   @@index([status])
   @@map("plans")
 }
 
 model PlanAssignment {
   id         String   @id @default(cuid())
-  clientId   String
+  memberId   String
   planId     String
   assignedAt DateTime @default(now())
-  client     Client   @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  member     Member   @relation(fields: [memberId], references: [id], onDelete: Cascade)
   plan       Plan     @relation(fields: [planId], references: [id], onDelete: Cascade)
 
-  @@unique([clientId, planId])
+  @@unique([memberId, planId])
   @@index([planId])
   @@map("plan_assignments")
+}
+
+// ─── Member Roles (roles assigned to members within a client) ────────────────
+
+model MemberRole {
+  id          String   @id @default(cuid())
+  name        String
+  permissions Json     @default("[]")
+  clientId    String
+  client      Client   @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  assignments MemberRoleAssignment[]
+
+  @@unique([name, clientId])
+  @@index([clientId])
+  @@map("client_roles")
+}
+
+model MemberRoleAssignment {
+  id         String     @id @default(cuid())
+  memberId   String
+  roleId     String
+  member     Member     @relation(fields: [memberId], references: [id], onDelete: Cascade)
+  role       MemberRole @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  assignedAt DateTime   @default(now())
+
+  @@unique([memberId, roleId])
+  @@index([roleId])
+  @@map("client_role_members")
+}
+
+// ─── Audit Logs ───────────────────────────────────────────────────────────────
+
+model AuditLog {
+  id         String    @id @default(cuid())
+  actorId    String
+  actorType  ActorType
+  action     String
+  targetId   String?
+  targetType String?
+  metadata   Json      @default("{}")
+  orgId      String?
+  createdAt  DateTime  @default(now())
+
+  @@index([orgId])
+  @@index([actorId])
+  @@index([createdAt])
+  @@map("audit_logs")
+}
+
+// ─── Notifications ────────────────────────────────────────────────────────────
+
+model Notification {
+  id            String                    @id @default(cuid())
+  title         String
+  body          String
+  recipientId   String
+  recipientType NotificationRecipientType
+  isRead        Boolean                   @default(false)
+  clientId      String
+  client        Client                    @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  createdAt     DateTime                  @default(now())
+
+  @@index([recipientId])
+  @@index([clientId])
+  @@map("notifications")
+}
+
+// ─── User Expenses (per-user JSON blob) ──────────────────────────────────────
+
+model UserExpenses {
+  id      String   @id @default(cuid())
+  userId  String   @unique
+  data    Json     @default("{}")
+  savedAt DateTime @default(now()) @updatedAt
+
+  @@map("user_expenses")
 }
 
 // ─── Invitations ─────────────────────────────────────────────────────────────
 
 model Invitation {
-  id             String           @id @default(cuid())
-  email          String
-  role           OrgMemberRole    @default(MEMBER)
-  status         InvitationStatus @default(PENDING)
-  token          String           @unique @default(cuid())
-  organizationId String
-  organization   Organization     @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  expiresAt      DateTime
-  acceptedAt     DateTime?
-  createdAt      DateTime         @default(now())
+  id         String           @id @default(cuid())
+  email      String
+  role       ClientMemberRole @default(MEMBER)
+  status     InvitationStatus @default(PENDING)
+  token      String           @unique @default(cuid())
+  clientId   String
+  client     Client           @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  expiresAt  DateTime
+  acceptedAt DateTime?
+  createdAt  DateTime         @default(now())
 
-  @@index([organizationId])
+  @@index([clientId])
   @@index([token])
   @@map("invitations")
 }

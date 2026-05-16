@@ -23,6 +23,7 @@ export type JwtPayload = {
   email: string;
   role: string;
   orgId: string | null;
+  impersonatedBy?: string;
 };
 
 export type OrgBranding = {

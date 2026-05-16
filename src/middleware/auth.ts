@@ -44,13 +44,13 @@ export async function loadOrgContext(req: Request, _res: Response, next: NextFun
   }
 
   try {
-    const org = await prisma.organization.findUnique({
+    const org = await prisma.client.findUnique({
       where: { id: user.orgId },
       select: { id: true, name: true, slug: true, branding: true, isActive: true },
     });
 
     if (!org || !org.isActive) {
-      next(new HttpError(403, "Organization not found or inactive"));
+      next(new HttpError(403, "Client not found or inactive"));
       return;
     }
 

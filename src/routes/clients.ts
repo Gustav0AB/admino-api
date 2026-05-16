@@ -1,121 +1,201 @@
+import { Router, Request, Response, NextFunction } from "express";
 import { z } from "zod";
+import * as bcrypt from "bcryptjs";
 import { prisma } from "@lib/prisma";
-import { createRouter } from "@lib/generic-router";
-import { requireAuth } from "@middleware/auth";
-import { HttpError, JwtPayload } from "@/types";
+import { requireAuth, requireRole, loadOrgContext } from "@middleware/auth";
+import { AuthRequest, HttpError } from "@/types";
+import { logAudit } from "@lib/audit";
 
-// ── Validation schemas ─────────────────────────────────────────────────────
+const router = Router();
+router.use(requireAuth, loadOrgContext);
 
-const createClientSchema = z.object({
+// ── Schemas ────────────────────────────────────────────────────────────────
+
+const updateBrandingSchema = z.object({
+  name: z.string().min(1).optional(),
+  primaryColor: z.string().optional(),
+  secondaryColor: z.string().optional(),
+  logoUrl: z.string().url().nullable().optional(),
+});
+
+const createMemberSchema = z.object({
   name: z.string().min(1),
   email: z.string().email(),
   password: z.string().min(8),
+  role: z.enum(["ADMIN", "MEMBER"]).default("MEMBER"),
+  permissions: z.array(z.string()).default([]),
 });
 
-const updateClientSchema = z.object({
+const updateMemberSchema = z.object({
   name: z.string().min(1).optional(),
-  email: z.string().email().optional(),
+  role: z.enum(["ADMIN", "MEMBER"]).optional(),
   isActive: z.boolean().optional(),
+  permissions: z.array(z.string()).optional(),
 });
 
-type CreateClient = z.infer<typeof createClientSchema>;
-type UpdateClient = z.infer<typeof updateClientSchema>;
+// ── Branding ───────────────────────────────────────────────────────────────
 
-// ── Select shape returned to callers ──────────────────────────────────────
+router.patch(
+  "/branding",
+  requireRole("OWNER", "ADMIN"),
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const user = (req as AuthRequest).user;
+      if (!user.orgId) throw new HttpError(403, "No client context");
+      const body = updateBrandingSchema.parse(req.body);
 
-const clientSelect = {
-  id: true,
-  name: true,
-  email: true,
-  isActive: true,
-  joinedAt: true,
-} as const;
+      const client = await prisma.client.findUnique({ where: { id: user.orgId } });
+      if (!client) throw new HttpError(404, "Client not found");
 
-// ── Helpers ────────────────────────────────────────────────────────────────
+      const { name, ...brandingFields } = body;
+      const updated = await prisma.client.update({
+        where: { id: user.orgId },
+        data: {
+          ...(name && { name }),
+          branding: { ...(client.branding as object), ...brandingFields },
+        },
+        select: { id: true, name: true, slug: true, branding: true },
+      });
 
-function resolveOrgId(
-  query: Record<string, string>,
-  user: JwtPayload
-): string {
-  // Org members / clients use their own orgId; system admins must pass ?orgId=
-  if (user.orgId) return user.orgId;
-  if (query.orgId) return query.orgId;
-  throw new HttpError(400, "orgId query parameter is required");
-}
-
-// ── Service ────────────────────────────────────────────────────────────────
-
-const clientsService = {
-  async findAll(params: Record<string, string>, user: JwtPayload) {
-    const organizationId = resolveOrgId(params, user);
-    return prisma.client.findMany({
-      where: { organizationId, isActive: true },
-      select: clientSelect,
-      orderBy: { joinedAt: "desc" },
-    });
-  },
-
-  async findById(id: string, user: JwtPayload) {
-    const client = await prisma.client.findUnique({
-      where: { id },
-      select: { ...clientSelect, organizationId: true },
-    });
-    if (!client) return null;
-    if (user.orgId && client.organizationId !== user.orgId) {
-      throw new HttpError(403, "Forbidden");
+      await logAudit(user, "client.branding.update", { targetId: user.orgId, targetType: "Client" });
+      res.json(updated);
+    } catch (e) {
+      next(e);
     }
-    return client;
-  },
+  }
+);
 
-  async create(data: CreateClient, user: JwtPayload) {
-    const { name, email, password } = data;
-    const organizationId = user.orgId;
-    if (!organizationId) throw new HttpError(403, "Only org members can create clients");
+// ── Client Members (staff) ─────────────────────────────────────────────────
 
-    const existing = await prisma.client.findFirst({
-      where: { email, organizationId },
+router.get("/members", async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const user = (req as AuthRequest).user;
+    if (!user.orgId) throw new HttpError(403, "No client context");
+
+    const clientMembers = await prisma.clientMember.findMany({
+      where: { clientId: user.orgId },
+      select: {
+        id: true,
+        name: true,
+        email: true,
+        role: true,
+        permissions: true,
+        isActive: true,
+        createdAt: true,
+      },
+      orderBy: { createdAt: "desc" },
     });
-    if (existing) throw new HttpError(409, "A client with this email already exists");
-
-    const bcrypt = await import("bcryptjs");
-    const hashed = await bcrypt.hash(password, 10);
-
-    return prisma.client.create({
-      data: { name, email, password: hashed, organizationId },
-      select: clientSelect,
-    });
-  },
-
-  async update(id: string, data: UpdateClient, user: JwtPayload) {
-    const client = await prisma.client.findUnique({ where: { id } });
-    if (!client) throw new HttpError(404, "Client not found");
-    if (user.orgId && client.organizationId !== user.orgId) {
-      throw new HttpError(403, "Forbidden");
-    }
-    return prisma.client.update({
-      where: { id },
-      data,
-      select: clientSelect,
-    });
-  },
-
-  async remove(id: string, user: JwtPayload) {
-    const client = await prisma.client.findUnique({ where: { id } });
-    if (!client) throw new HttpError(404, "Client not found");
-    if (user.orgId && client.organizationId !== user.orgId) {
-      throw new HttpError(403, "Forbidden");
-    }
-    await prisma.client.delete({ where: { id } });
-  },
-};
-
-// ── Router (generic CRUD factory + auth guard) ────────────────────────────
-
-type ClientRow = { id: string; name: string; email: string; isActive: boolean; joinedAt: Date };
-
-export default createRouter<ClientRow, CreateClient, UpdateClient>({
-  service: clientsService,
-  createSchema: createClientSchema,
-  updateSchema: updateClientSchema,
-  before: [requireAuth],
+    res.json(clientMembers);
+  } catch (e) {
+    next(e);
+  }
 });
+
+router.post(
+  "/members",
+  requireRole("OWNER", "ADMIN"),
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const user = (req as AuthRequest).user;
+      if (!user.orgId) throw new HttpError(403, "No client context");
+      const body = createMemberSchema.parse(req.body);
+
+      const existing = await prisma.clientMember.findFirst({
+        where: { email: body.email, clientId: user.orgId },
+      });
+      if (existing) throw new HttpError(409, "A member with this email already exists");
+
+      const hashed = await bcrypt.hash(body.password, 10);
+      const clientMember = await prisma.clientMember.create({
+        data: {
+          name: body.name,
+          email: body.email,
+          password: hashed,
+          role: body.role,
+          permissions: body.permissions,
+          clientId: user.orgId,
+        },
+        select: {
+          id: true,
+          name: true,
+          email: true,
+          role: true,
+          permissions: true,
+          isActive: true,
+          createdAt: true,
+        },
+      });
+
+      await logAudit(user, "member.create", {
+        targetId: clientMember.id,
+        targetType: "ClientMember",
+        metadata: { email: body.email, role: body.role },
+      });
+      res.status(201).json(clientMember);
+    } catch (e) {
+      next(e);
+    }
+  }
+);
+
+router.patch(
+  "/members/:id",
+  requireRole("OWNER", "ADMIN"),
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const { id } = req.params as Record<string, string>;
+      const user = (req as AuthRequest).user;
+      if (!user.orgId) throw new HttpError(403, "No client context");
+      const body = updateMemberSchema.parse(req.body);
+
+      const clientMember = await prisma.clientMember.findFirst({
+        where: { id, clientId: user.orgId },
+      });
+      if (!clientMember) throw new HttpError(404, "Member not found");
+      if (clientMember.role === "OWNER" && user.role !== "OWNER") {
+        throw new HttpError(403, "Only the owner can modify owner accounts");
+      }
+
+      const updated = await prisma.clientMember.update({
+        where: { id },
+        data: body,
+        select: { id: true, name: true, email: true, role: true, permissions: true, isActive: true },
+      });
+
+      await logAudit(user, "member.update", {
+        targetId: clientMember.id,
+        targetType: "ClientMember",
+        metadata: body as Record<string, unknown>,
+      });
+      res.json(updated);
+    } catch (e) {
+      next(e);
+    }
+  }
+);
+
+router.delete(
+  "/members/:id",
+  requireRole("OWNER", "ADMIN"),
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const { id } = req.params as Record<string, string>;
+      const user = (req as AuthRequest).user;
+      if (!user.orgId) throw new HttpError(403, "No client context");
+
+      const clientMember = await prisma.clientMember.findFirst({
+        where: { id, clientId: user.orgId },
+      });
+      if (!clientMember) throw new HttpError(404, "Member not found");
+      if (clientMember.role === "OWNER") throw new HttpError(403, "Cannot deactivate the client owner");
+
+      await prisma.clientMember.update({ where: { id }, data: { isActive: false } });
+      await logAudit(user, "member.deactivate", { targetId: clientMember.id, targetType: "ClientMember" });
+      res.status(204).send();
+    } catch (e) {
+      next(e);
+    }
+  }
+);
+
+export default router;

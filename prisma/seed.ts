@@ -1,11 +1,15 @@
+import { PrismaPg } from "@prisma/adapter-pg";
 import { PrismaClient } from "@prisma/client";
 import bcrypt from "bcryptjs";
+import "dotenv/config";
 
-const prisma = new PrismaClient();
+const prisma = new PrismaClient({
+  adapter: new PrismaPg({ connectionString: process.env.DATABASE_URL }),
+});
 
 async function main() {
   const adminPassword = await bcrypt.hash("Admin1234!", 10);
-  const clientPassword = await bcrypt.hash("Client1234!", 10);
+  const memberPassword = await bcrypt.hash("Client1234!", 10);
 
   const admin = await prisma.systemAdmin.upsert({
     where: { email: "admin@admino.io" },
@@ -17,7 +21,7 @@ async function main() {
     },
   });
 
-  const org = await prisma.organization.upsert({
+  const client = await prisma.client.upsert({
     where: { slug: "elite-academy" },
     update: {},
     create: {
@@ -31,15 +35,15 @@ async function main() {
     },
   });
 
-  const orgOwner = await prisma.orgMember.upsert({
-    where: { email_organizationId: { email: "owner@elite-academy.com", organizationId: org.id } },
+  const clientOwner = await prisma.clientMember.upsert({
+    where: { email_clientId: { email: "owner@elite-academy.com", clientId: client.id } },
     update: {},
     create: {
       email: "owner@elite-academy.com",
       password: await bcrypt.hash("Owner1234!", 10),
       name: "Academy Owner",
       role: "OWNER",
-      organizationId: org.id,
+      clientId: client.id,
     },
   });
 
@@ -55,7 +59,7 @@ async function main() {
           name,
           description: `${name} — designed for elite athletes.`,
           status: "ACTIVE",
-          organizationId: org.id,
+          clientId: client.id,
         },
       })
     )
@@ -70,33 +74,33 @@ async function main() {
   ];
 
   for (let i = 0; i < athletes.length; i++) {
-    const athlete = athletes[i];
-    const client = await prisma.client.upsert({
-      where: { email_organizationId: { email: athlete.email, organizationId: org.id } },
+    const athlete = athletes[i]!;
+    const member = await prisma.member.upsert({
+      where: { email_clientId: { email: athlete.email, clientId: client.id } },
       update: {},
       create: {
         email: athlete.email,
-        password: clientPassword,
+        password: memberPassword,
         name: athlete.name,
-        organizationId: org.id,
+        clientId: client.id,
       },
     });
 
     await prisma.planAssignment.upsert({
-      where: { clientId_planId: { clientId: client.id, planId: plans[i].id } },
+      where: { memberId_planId: { memberId: member.id, planId: plans[i]!.id } },
       update: {},
       create: {
-        clientId: client.id,
-        planId: plans[i].id,
+        memberId: member.id,
+        planId: plans[i]!.id,
       },
     });
   }
 
   console.log(`✓ SystemAdmin:  ${admin.email}`);
-  console.log(`✓ Organization: ${org.name} (${org.slug})`);
-  console.log(`✓ Org Owner:    ${orgOwner.email}`);
+  console.log(`✓ Client:       ${client.name} (${client.slug})`);
+  console.log(`✓ Client Owner: ${clientOwner.email}`);
   console.log(`✓ Plans:        ${plans.length} created`);
-  console.log(`✓ Athletes:     ${athletes.length} created with plan assignments`);
+  console.log(`✓ Members:      ${athletes.length} created with plan assignments`);
 }
 
 main()
