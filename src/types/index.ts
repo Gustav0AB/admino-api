@@ -20,7 +20,7 @@ export type ApiError = {
 
 export type JwtPayload = {
   sub: string;
-  email: string;
+  username: string;
   role: string;
   orgId: string | null;
   impersonatedBy?: string;

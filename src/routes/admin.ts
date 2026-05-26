@@ -16,13 +16,18 @@ router.use(requireAuth, requireRole("SYSTEM_ADMIN"));
 const createClientSchema = z.object({
   name: z.string().min(1),
   slug: z.string().min(1).regex(/^[a-z0-9-]+$/, "Slug must be lowercase alphanumeric with dashes"),
-  ownerEmail: z.string().email(),
+  tipo: z.string().default("gym"),
   ownerPassword: z.string().min(8),
   ownerName: z.string().min(1),
+  clientPermissions: z.array(z.string()).default([]),
+  memberPermissions: z.array(z.string()).default([]),
 });
 
 const updateClientSchema = z.object({
   name: z.string().min(1).optional(),
+  tipo: z.string().optional(),
+  clientPermissions: z.array(z.string()).optional(),
+  memberPermissions: z.array(z.string()).optional(),
   branding: z
     .object({
       primaryColor: z.string().optional(),
@@ -54,7 +59,7 @@ router.get("/clients", async (_req: Request, res: Response, next: NextFunction) 
 router.post("/clients", async (req: Request, res: Response, next: NextFunction) => {
   try {
     const user = (req as AuthRequest).user;
-    const { name, slug, ownerEmail, ownerPassword, ownerName } = createClientSchema.parse(req.body);
+    const { name, slug, tipo, ownerPassword, ownerName, clientPermissions, memberPermissions } = createClientSchema.parse(req.body);
 
     const existing = await prisma.client.findUnique({ where: { slug } });
     if (existing) throw new HttpError(409, "A client with this slug already exists");
@@ -62,10 +67,10 @@ router.post("/clients", async (req: Request, res: Response, next: NextFunction) 
     const hashed = await bcrypt.hash(ownerPassword, 10);
 
     const client = await prisma.$transaction(async (tx) => {
-      const created = await tx.client.create({ data: { name, slug } });
+      const created = await tx.client.create({ data: { name, slug, tipo, clientPermissions, memberPermissions } });
       await tx.clientMember.create({
         data: {
-          email: ownerEmail,
+          username: slug,
           password: hashed,
           name: ownerName,
           role: "OWNER",
@@ -80,7 +85,11 @@ router.post("/clients", async (req: Request, res: Response, next: NextFunction) 
       targetType: "Client",
       metadata: { name, slug },
     });
-    res.status(201).json(client);
+    const clientWithCount = await prisma.client.findUnique({
+      where: { id: client.id },
+      include: { _count: { select: { clientMembers: true, members: true } } },
+    });
+    res.status(201).json(clientWithCount);
   } catch (e) {
     next(e);
   }
@@ -93,9 +102,9 @@ router.get("/clients/:id", async (req: Request, res: Response, next: NextFunctio
       where: { id },
       include: {
         clientMembers: {
-          select: { id: true, name: true, email: true, role: true, isActive: true, permissions: true },
+          select: { id: true, name: true, username: true, role: true, isActive: true, permissions: true },
         },
-        _count: { select: { members: true, plans: true } },
+        _count: { select: { clientMembers: true, members: true, plans: true } },
       },
     });
     if (!client) throw new HttpError(404, "Client not found");
@@ -118,6 +127,9 @@ router.patch("/clients/:id", async (req: Request, res: Response, next: NextFunct
       where: { id },
       data: {
         ...(body.name && { name: body.name }),
+        ...(body.tipo && { tipo: body.tipo }),
+        ...(body.clientPermissions && { clientPermissions: body.clientPermissions }),
+        ...(body.memberPermissions && { memberPermissions: body.memberPermissions }),
         ...(body.branding && { branding: { ...(client.branding as object), ...body.branding } }),
       },
     });
@@ -158,7 +170,7 @@ router.get("/clients/:id/export", async (req: Request, res: Response, next: Next
       where: { id },
       include: {
         clientMembers: {
-          select: { id: true, name: true, email: true, role: true, permissions: true, isActive: true, createdAt: true },
+          select: { id: true, name: true, username: true, role: true, permissions: true, isActive: true, createdAt: true },
         },
         members: {
           select: { id: true, name: true, email: true, isActive: true, joinedAt: true },
@@ -204,26 +216,28 @@ router.post("/impersonate", async (req: Request, res: Response, next: NextFuncti
     const actor = (req as AuthRequest).user;
     const { targetId, targetType } = impersonateSchema.parse(req.body);
 
-    type UserRow = { id: string; email: string; role?: string; clientId?: string };
+    type UserRow = { id: string; username: string; role?: string; clientId?: string };
     let targetUser: UserRow | null = null;
 
     if (targetType === "ORG_MEMBER") {
-      targetUser = await prisma.clientMember.findUnique({
+      const cm = await prisma.clientMember.findUnique({
         where: { id: targetId },
-        select: { id: true, email: true, role: true, clientId: true },
+        select: { id: true, username: true, role: true, clientId: true },
       });
+      targetUser = cm;
     } else {
-      targetUser = await prisma.member.findUnique({
+      const m = await prisma.member.findUnique({
         where: { id: targetId },
         select: { id: true, email: true, clientId: true },
       });
+      targetUser = m ? { ...m, username: m.email } : null;
     }
 
     if (!targetUser) throw new HttpError(404, "Target user not found");
 
     const payload: JwtPayload = {
       sub: targetUser.id,
-      email: targetUser.email,
+      username: targetUser.username,
       role: targetType === "MEMBER" ? "MEMBER" : (targetUser.role ?? "MEMBER"),
       orgId: targetUser.clientId ?? null,
       impersonatedBy: actor.sub,
@@ -234,7 +248,7 @@ router.post("/impersonate", async (req: Request, res: Response, next: NextFuncti
     await logAudit(actor, "user.impersonate", {
       targetId: targetUser.id,
       targetType,
-      metadata: { targetEmail: targetUser.email },
+      metadata: { targetUsername: targetUser.username },
     });
 
     res.json({ token, user: payload });

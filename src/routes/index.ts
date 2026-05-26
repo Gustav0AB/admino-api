@@ -8,6 +8,9 @@ import plansRouter from "./plans";
 import memberRolesRouter from "./member-roles";
 import notificationsRouter from "./notifications";
 import auditLogsRouter from "./audit-logs";
+import trainingPlansRouter from "./training-plans";
+import workoutChecksRouter from "./workout-checks";
+import trainingEventsRouter from "./training-events";
 
 const router = Router();
 
@@ -20,5 +23,8 @@ router.use("/plans", plansRouter);
 router.use("/member-roles", memberRolesRouter);
 router.use("/notifications", notificationsRouter);
 router.use("/audit-logs", auditLogsRouter);
+router.use("/training-plans", trainingPlansRouter);
+router.use("/workout-checks", workoutChecksRouter);
+router.use("/training-events", trainingEventsRouter);
 
 export default router;

@@ -10,7 +10,7 @@ import { requireAuth } from "@middleware/auth";
 const router = Router();
 
 const loginSchema = z.object({
-  email: z.string().min(1),
+  username: z.string().min(1),
   password: z.string().min(1),
 });
 
@@ -28,11 +28,13 @@ router.post(
   "/login",
   async (req: Request, res: Response, next: NextFunction) => {
     try {
-      const { email, password } = loginSchema.parse(req.body);
+      const { username, password } = loginSchema.parse(req.body);
 
-      const systemAdmin = await prisma.systemAdmin.findUnique({ where: { email } });
-      const clientMember = !systemAdmin ? await prisma.clientMember.findFirst({ where: { email } }) : null;
-      const member = !systemAdmin && !clientMember ? await prisma.member.findFirst({ where: { email } }) : null;
+      const systemAdmin = await prisma.systemAdmin.findUnique({ where: { email: username } });
+      const clientMember = !systemAdmin ? await prisma.clientMember.findFirst({ where: { username } }) : null;
+      const member = !systemAdmin && !clientMember
+        ? await prisma.member.findFirst({ where: { OR: [{ email: username }, { username }] } })
+        : null;
 
       const user = systemAdmin ?? clientMember ?? member;
       if (!user || !(await bcrypt.compare(password, user.password))) {
@@ -41,7 +43,7 @@ router.post(
 
       const payload: JwtPayload = {
         sub: user.id,
-        email: user.email,
+        username: clientMember ? clientMember.username : (user as { email: string }).email,
         role: systemAdmin ? "SYSTEM_ADMIN" : clientMember ? String(clientMember.role) : "MEMBER",
         orgId: "clientId" in user ? user.clientId : null,
       };

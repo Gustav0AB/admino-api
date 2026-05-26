@@ -20,7 +20,7 @@ const updateBrandingSchema = z.object({
 
 const createMemberSchema = z.object({
   name: z.string().min(1),
-  email: z.string().email(),
+  username: z.string().min(1),
   password: z.string().min(8),
   role: z.enum(["ADMIN", "MEMBER"]).default("MEMBER"),
   permissions: z.array(z.string()).default([]),
@@ -31,6 +31,34 @@ const updateMemberSchema = z.object({
   role: z.enum(["ADMIN", "MEMBER"]).optional(),
   isActive: z.boolean().optional(),
   permissions: z.array(z.string()).optional(),
+});
+
+// ── Config (branding + features for the logged-in org) ────────────────────
+
+router.get("/config", async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const user = (req as AuthRequest).user;
+    if (!user.orgId) throw new HttpError(403, "No client context");
+
+    const client = await prisma.client.findUnique({
+      where: { id: user.orgId },
+      select: { id: true, name: true, slug: true, branding: true, clientPermissions: true, memberPermissions: true },
+    });
+    if (!client) throw new HttpError(404, "Client not found");
+
+    const branding = client.branding as { primaryColor: string; secondaryColor: string; logoUrl: string | null };
+    res.json({
+      orgName: client.name,
+      slug: client.slug,
+      primaryColor: branding.primaryColor,
+      secondaryColor: branding.secondaryColor,
+      logoUrl: branding.logoUrl,
+      clientPermissions: client.clientPermissions,
+      memberPermissions: client.memberPermissions,
+    });
+  } catch (e) {
+    next(e);
+  }
 });
 
 // ── Branding ───────────────────────────────────────────────────────────────
@@ -77,7 +105,7 @@ router.get("/members", async (req: Request, res: Response, next: NextFunction) =
       select: {
         id: true,
         name: true,
-        email: true,
+        username: true,
         role: true,
         permissions: true,
         isActive: true,
@@ -100,16 +128,20 @@ router.post(
       if (!user.orgId) throw new HttpError(403, "No client context");
       const body = createMemberSchema.parse(req.body);
 
+      const client = await prisma.client.findUnique({ where: { id: user.orgId }, select: { slug: true } });
+      if (!client) throw new HttpError(404, "Client not found");
+      const prefixedUsername = `${client.slug}-${body.username}`;
+
       const existing = await prisma.clientMember.findFirst({
-        where: { email: body.email, clientId: user.orgId },
+        where: { username: prefixedUsername, clientId: user.orgId },
       });
-      if (existing) throw new HttpError(409, "A member with this email already exists");
+      if (existing) throw new HttpError(409, "A member with this username already exists");
 
       const hashed = await bcrypt.hash(body.password, 10);
       const clientMember = await prisma.clientMember.create({
         data: {
           name: body.name,
-          email: body.email,
+          username: prefixedUsername,
           password: hashed,
           role: body.role,
           permissions: body.permissions,
@@ -118,7 +150,7 @@ router.post(
         select: {
           id: true,
           name: true,
-          email: true,
+          username: true,
           role: true,
           permissions: true,
           isActive: true,
@@ -129,7 +161,7 @@ router.post(
       await logAudit(user, "member.create", {
         targetId: clientMember.id,
         targetType: "ClientMember",
-        metadata: { email: body.email, role: body.role },
+        metadata: { username: body.username, role: body.role },
       });
       res.status(201).json(clientMember);
     } catch (e) {
@@ -159,7 +191,7 @@ router.patch(
       const updated = await prisma.clientMember.update({
         where: { id },
         data: body,
-        select: { id: true, name: true, email: true, role: true, permissions: true, isActive: true },
+        select: { id: true, name: true, username: true, role: true, permissions: true, isActive: true },
       });
 
       await logAudit(user, "member.update", {

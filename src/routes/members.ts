@@ -8,14 +8,26 @@ import { HttpError, JwtPayload } from "@/types";
 
 const createMemberSchema = z.object({
   name: z.string().min(1),
-  email: z.string().email(),
-  password: z.string().min(8),
-});
+  lastname: z.string().min(1),
+  birthdate: z.string().datetime({ offset: true }).or(z.string().date()),
+  email: z.string().email().optional(),
+  username: z.string().min(3).regex(/^[a-zA-Z0-9_.-]+$/, "Only letters, numbers, dots, hyphens and _").optional(),
+  password: z.string().min(8).optional(),
+}).refine(
+  (d) => (d.username == null) === (d.password == null),
+  { message: "username and password must both be provided or both omitted" }
+);
 
 const updateMemberSchema = z.object({
   name: z.string().min(1).optional(),
+  lastname: z.string().min(1).optional(),
+  birthdate: z.string().datetime({ offset: true }).or(z.string().date()).optional(),
   email: z.string().email().optional(),
   isActive: z.boolean().optional(),
+  peso: z.number().positive().optional().nullable(),
+  altura: z.number().positive().optional().nullable(),
+  categoria: z.enum(["principiante", "intermedio", "avanzado", "semi-profesional", "profesional"]).optional().nullable(),
+  grado: z.string().optional().nullable(),
 });
 
 type CreateMember = z.infer<typeof createMemberSchema>;
@@ -26,7 +38,14 @@ type UpdateMember = z.infer<typeof updateMemberSchema>;
 const memberSelect = {
   id: true,
   name: true,
+  lastname: true,
+  birthdate: true,
+  username: true,
   email: true,
+  peso: true,
+  altura: true,
+  categoria: true,
+  grado: true,
   isActive: true,
   joinedAt: true,
 } as const;
@@ -64,18 +83,39 @@ const membersService = {
   },
 
   async create(data: CreateMember, user: JwtPayload) {
-    const { name, email, password } = data;
+    const { name, lastname, birthdate, username } = data;
     const clientId = user.orgId;
     if (!clientId) throw new HttpError(403, "Only client members can create members");
 
-    const existing = await prisma.member.findFirst({ where: { email, clientId } });
-    if (existing) throw new HttpError(409, "A member with this email already exists");
+    const client = await prisma.client.findUnique({ where: { id: clientId }, select: { slug: true } });
+    if (!client) throw new HttpError(404, "Client not found");
+    const prefixedUsername = username ? `${client.slug}-${username}` : null;
+
+    const { randomUUID } = await import("crypto");
+    const email = data.email ?? `${name.toLowerCase().replace(/\s+/g, ".")}.${randomUUID().slice(0, 6)}@member.local`;
+    const rawPassword = data.password ?? randomUUID();
+
+    if (prefixedUsername) {
+      const usernameConflict = await prisma.member.findFirst({ where: { username: prefixedUsername, clientId } });
+      if (usernameConflict) throw new HttpError(409, "Username already taken");
+    }
+
+    const emailConflict = await prisma.member.findFirst({ where: { email, clientId } });
+    if (emailConflict) throw new HttpError(409, "A member with this email already exists");
 
     const bcrypt = await import("bcryptjs");
-    const hashed = await bcrypt.hash(password, 10);
+    const hashed = await bcrypt.hash(rawPassword, 10);
 
     return prisma.member.create({
-      data: { name, email, password: hashed, clientId },
+      data: {
+        name,
+        lastname,
+        birthdate: birthdate ? new Date(birthdate) : null,
+        username: prefixedUsername,
+        email,
+        password: hashed,
+        clientId,
+      },
       select: memberSelect,
     });
   },
@@ -86,7 +126,12 @@ const membersService = {
     if (user.orgId && member.clientId !== user.orgId) {
       throw new HttpError(403, "Forbidden");
     }
-    return prisma.member.update({ where: { id }, data, select: memberSelect });
+    const { birthdate, ...rest } = data;
+    return prisma.member.update({
+      where: { id },
+      data: { ...rest, ...(birthdate ? { birthdate: new Date(birthdate) } : {}) },
+      select: memberSelect,
+    });
   },
 
   async remove(id: string, user: JwtPayload) {
@@ -101,7 +146,7 @@ const membersService = {
 
 // ── Router ────────────────────────────────────────────────────────────────
 
-type MemberRow = { id: string; name: string; email: string; isActive: boolean; joinedAt: Date };
+type MemberRow = { id: string; name: string; lastname: string; birthdate: Date | null; username: string | null; email: string; peso: number | null; altura: number | null; categoria: string | null; grado: string | null; isActive: boolean; joinedAt: Date };
 
 export default createRouter<MemberRow, CreateMember, UpdateMember>({
   service: membersService,
