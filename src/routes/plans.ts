@@ -155,6 +155,10 @@ router.delete(
       const user = (req as AuthRequest).user;
       const { memberId, planId } = req.params as Record<string, string>;
 
+      const plan = await prisma.plan.findUnique({ where: { id: planId } });
+      if (!plan) throw new HttpError(404, "Plan not found");
+      if (user.orgId && plan.clientId !== user.orgId) throw new HttpError(403, "Forbidden");
+
       const assignment = await prisma.planAssignment.findUnique({
         where: { memberId_planId: { memberId, planId } },
       });

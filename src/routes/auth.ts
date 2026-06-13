@@ -52,7 +52,8 @@ router.post(
         expiresIn: env.jwt.expiresIn,
       } as jwt.SignOptions);
 
-      res.json({ token, user: payload });
+      const { exp } = jwt.decode(token) as { exp: number };
+      res.json({ token, user: payload, expiresAt: exp });
     } catch (e) {
       next(e);
     }
@@ -94,6 +95,28 @@ router.patch(
       await updateFn(hash);
 
       res.json({ message: "Password updated successfully" });
+    } catch (e) {
+      next(e);
+    }
+  }
+);
+
+/**
+ * POST /auth/refresh
+ * Issues a new token for the currently authenticated user.
+ */
+router.post(
+  "/refresh",
+  requireAuth,
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const { sub, username, role, orgId } = (req as AuthRequest).user;
+      const payload: JwtPayload = { sub, username, role, orgId };
+      const token = jwt.sign(payload, env.jwt.secret, {
+        expiresIn: env.jwt.expiresIn,
+      } as jwt.SignOptions);
+      const { exp } = jwt.decode(token) as { exp: number };
+      res.json({ token, expiresAt: exp });
     } catch (e) {
       next(e);
     }

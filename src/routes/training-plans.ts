@@ -98,6 +98,10 @@ router.delete("/:id", requireRole("OWNER", "ADMIN", "SYSTEM_ADMIN"), async (req:
 router.post("/assign", requireRole("OWNER", "ADMIN", "SYSTEM_ADMIN"), async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { memberId, planId } = assignSchema.parse(req.body);
+    const user = (req as AuthRequest).user;
+    const plan = await prisma.trainingPlan.findUnique({ where: { id: planId } });
+    if (!plan) throw new HttpError(404, "Plan not found");
+    if (user.orgId && plan.clientId !== user.orgId) throw new HttpError(403, "Forbidden");
     const assignment = await prisma.trainingPlanAssignment.upsert({
       where: { memberId_planId: { memberId, planId } },
       create: { memberId, planId },
@@ -109,8 +113,13 @@ router.post("/assign", requireRole("OWNER", "ADMIN", "SYSTEM_ADMIN"), async (req
 
 router.delete("/assign/:memberId/:planId", requireRole("OWNER", "ADMIN", "SYSTEM_ADMIN"), async (req: Request, res: Response, next: NextFunction) => {
   try {
+    const user = (req as AuthRequest).user;
+    const planId = req.params["planId"] as string;
+    const plan = await prisma.trainingPlan.findUnique({ where: { id: planId } });
+    if (!plan) throw new HttpError(404, "Plan not found");
+    if (user.orgId && plan.clientId !== user.orgId) throw new HttpError(403, "Forbidden");
     await prisma.trainingPlanAssignment.deleteMany({
-      where: { memberId: req.params["memberId"] as string, planId: req.params["planId"] as string },
+      where: { memberId: req.params["memberId"] as string, planId },
     });
     res.status(204).send();
   } catch (e) { next(e); }
