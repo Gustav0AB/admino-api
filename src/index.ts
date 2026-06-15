@@ -11,12 +11,15 @@ async function main() {
 
   initSocket(httpServer);
 
+  await new Promise<void>((resolve) => {
+    httpServer.listen(env.port, () => {
+      console.log(`[server] Running on http://localhost:${env.port} (${env.nodeEnv})`);
+      resolve();
+    });
+  });
+
   await prisma.$connect();
   console.log("[db] Prisma connected");
-
-  httpServer.listen(env.port, () => {
-    console.log(`[server] Running on http://localhost:${env.port} (${env.nodeEnv})`);
-  });
 }
 
 main().catch((err) => {
