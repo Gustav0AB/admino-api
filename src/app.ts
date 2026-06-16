@@ -12,7 +12,19 @@ export function createApp() {
 
   // ── Security & parsing ───────────────────────────────────────────────────
   app.use(helmet());
-  app.use(cors({ origin: env.cors.origin, credentials: true }));
+  app.use(
+    cors({
+      origin: (origin, callback) => {
+        // Allow requests with no origin (e.g. mobile apps, curl, server-to-server)
+        if (!origin) return callback(null, true);
+        if (env.cors.allowedOrigins.includes(origin)) {
+          return callback(null, true);
+        }
+        return callback(new Error(`CORS: origin '${origin}' not allowed`));
+      },
+      credentials: true,
+    })
+  );
   app.use(express.json());
   app.use(express.urlencoded({ extended: true }));
 
