@@ -1,4 +1,5 @@
 import "dotenv/config";
+console.log("[boot] index.ts loaded, PORT=" + process.env.PORT);
 import { createServer } from "http";
 import { createApp } from "./app";
 import { env } from "@config/env";
