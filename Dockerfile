@@ -21,6 +21,13 @@ RUN echo "Verifying path alias resolution..." && \
     fi && \
     echo "OK: all aliases resolved"
 
+# Verify tsc-alias rewrote path aliases — fail the build if any remain
+RUN if grep -r '"@config/' dist/ || grep -r '"@lib/' dist/ || grep -r '"@middleware/' dist/ || grep -r '"@routes/' dist/ || grep -r '"@/types' dist/; then \
+      echo "ERROR: tsc-alias did not rewrite all path aliases in dist/" && exit 1; \
+    else \
+      echo "OK: all path aliases resolved"; \
+    fi
+
 # ---- runtime ----
 FROM node:20-alpine
 
