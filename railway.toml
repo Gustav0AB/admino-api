@@ -3,7 +3,7 @@ builder = "DOCKERFILE"
 dockerfilePath = "Dockerfile"
 
 [deploy]
-startCommand = "node_modules/.bin/prisma migrate deploy && node dist/index.js 2>&1 || (echo 'SERVER CRASHED' && sleep 60)"
+startCommand = "node_modules/.bin/prisma migrate deploy && node dist/index.js"
 healthcheckPath = "/health"
 healthcheckTimeout = 60
 restartPolicyType = "ON_FAILURE"
