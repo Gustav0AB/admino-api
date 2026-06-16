@@ -16,9 +16,3 @@ export const prisma =
 if (process.env.NODE_ENV !== "production") {
   globalThis.prisma = prisma;
 }
-
-export const prisma = new Proxy({} as PrismaClient, {
-  get(_target, prop) {
-    return (getClient() as Record<string | symbol, unknown>)[prop];
-  },
-});
