@@ -13,6 +13,13 @@ COPY src ./src
 
 RUN npm run prisma:generate
 RUN npm run build
+RUN echo "Verifying path alias resolution..." && \
+    if grep -rqE "require\(['\"]@(lib|config|middleware|routes)/|require\(['\"]@/types" dist/; then \
+      echo "ERROR: Unresolved TypeScript path aliases in dist/:"; \
+      grep -rnE "require\(['\"]@(lib|config|middleware|routes)/|require\(['\"]@/types" dist/; \
+      exit 1; \
+    fi && \
+    echo "OK: all aliases resolved"
 
 # ---- runtime ----
 FROM node:20-alpine
